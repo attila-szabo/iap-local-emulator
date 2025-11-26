@@ -1,0 +1,72 @@
+version: "3.8"
+
+services:
+  pubsub-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    container_name: google-pubsub-emulator
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=emulator-project
+    ports:
+      - "8085:8085" # Pub/Sub gRPC endpoint (exposed to host)
+    environment:
+      - PUBSUB_PROJECT_ID=emulator-project
+    networks:
+      - iap-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Google Play IAP API Emulator (Custom)
+  iap-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iap-local-emulator
+    ports:
+      - "8080:8080" # HTTP API endpoint (exposed to host)
+    environment:
+      # Pub/Sub configuration
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - PUBSUB_PROJECT_ID=emulator-project
+      - PUBSUB_TOPIC_NAME=google-play-rtdn
+
+      # API configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+
+      # Feature flags
+      - AUTO_CREATE_PUBSUB_RESOURCES=true
+      - ENABLE_SWAGGER_UI=true
+
+    volumes:
+      # Mount config directory for product definitions
+      - ./config:/app/config:ro
+
+      # Mount for development (optional - uncomment for hot reload)
+      # - ./iap_emulator:/app/iap_emulator:ro
+
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    networks:
+      - iap-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  iap-network:
+    name: iap-emulator-network
+    driver: bridge
+# Optional: Add volumes for persistence (if needed)
+# volumes:
+#   pubsub-data:
+#   iap-data:

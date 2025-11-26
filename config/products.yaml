@@ -1,0 +1,162 @@
+# Google Play IAP Emulator - Product Configuration
+# This file defines the products and subscriptions available in the emulator
+
+# Pub/Sub Configuration
+pubsub:
+  project_id: "emulator-project"
+  topic: "iap_rtdn"
+  # Subscription created automatically on startup
+  default_subscription: "iap_rtdn_sub"
+
+# Auto-Renewing Subscriptions
+subscriptions:
+  # ============================================================================
+  # PERSONAL PLAN
+  # ============================================================================
+
+  # Personal - Yearly (Renewable)
+  - id: "premium.personal.yearly"
+    type: "subs"
+    title: "Premium Personal Yearly"
+    description: "Secure password management for one user"
+    price_micros: 29990000  # $29.99 USD per year
+    currency: "USD"
+    billing_period: "P1Y"  # 1 year
+    trial_period: "P30D"   # 30 day free trial
+    grace_period: "P7D"    # 7 days
+
+    base_plan_id: "personal-yearly"
+    offer_id: null  # Base plan, no offer
+
+    features:
+      - "Unlimited passwords"
+      - "Secure vault"
+      - "Password generator"
+      - "Multi-device sync"
+      - "2FA authentication"
+      - "Secure sharing (limited)"
+      - "Priority support"
+
+  # ============================================================================
+  # FAMILY PLAN (Up to 6 users)
+  # ============================================================================
+
+  # Family - Yearly (Renewable)
+  - id: "premium.family.yearly"
+    type: "subs"
+    title: "Premium Family Yearly"
+    description: "Secure password management for up to 6 users"
+    price_micros: 49990000  # $49.99 USD per year
+    currency: "USD"
+    billing_period: "P1Y"  # 1 year
+    trial_period: "P30D"   # 30 day free trial
+    grace_period: "P7D"    # 7 days
+
+    base_plan_id: "family-yearly"
+    offer_id: null  # Base plan, no offer
+    max_users: 6
+
+    features:
+      - "Up to 6 family members"
+      - "Unlimited passwords per user"
+      - "Shared family vault"
+      - "Individual vaults"
+      - "Password generator"
+      - "Multi-device sync"
+      - "2FA authentication"
+      - "Unlimited secure sharing"
+      - "Family dashboard"
+      - "Priority support"
+      - "Advanced reporting"
+
+  - id: "ditc_premium_sub_annual"
+    type: "subs"
+    title: "DITC Premium Annual"
+    description: "Annual premium access for DITC"
+    price_micros: 35900000        # $35.90 USD
+    currency: "USD"
+    billing_period: "P1Y"         # 1 year, auto-renews
+    trial_period: null
+    grace_period: "P7D"           # optional; adjust or null if you don’t want it
+
+    base_plan_id: "inapp-yearly"  # aligns with your “InApp (yearly)” payment naming
+    offer_id: null
+
+    features:
+      - "Premium access"
+      - "Annual billing"
+      - "Auto-renewal"
+
+# Default Package Name (can be overridden in API calls)
+default_package_name: "com.example.secureapp"
+
+# Emulator Settings
+emulator:
+  # Automatically renew subscriptions when time advances
+  auto_renew_enabled: true
+
+  # Send RTDN notifications for all events
+  rtdn_enabled: true
+
+  # Simulate payment failures (percentage chance on renewal)
+  simulate_payment_failures: false
+  payment_failure_rate: 0.05  # 5% chance of payment failure
+
+  # Token settings
+  token_prefix: "emulator"
+  token_length: 128
+
+  # Subscription behavior
+  subscriptions:
+    # When subscription expires in grace period
+    grace_period_behavior: "retain_access"  # User still has access
+
+    # When subscription in account hold
+    account_hold_behavior: "revoke_access"  # User loses access
+
+    # Allow subscription changes (personal to family or vice versa)
+    allow_changes: true
+
+    # Proration mode for subscription changes
+    proration_mode: "immediate_with_time_proration"
+
+products:
+  # Virtual Currency - Consumable
+  - id: "coins.100"
+    type: "inapp"
+    title: "100 Coins"
+    description: "100 virtual coins"
+    price_micros: 990000  # $0.99 USD
+    currency: "USD"
+    consumable: true
+
+  - id: "coins.500"
+    type: "inapp"
+    title: "500 Coins"
+    description: "500 virtual coins"
+    price_micros: 4990000  # $4.99 USD
+    currency: "USD"
+    consumable: true
+
+  - id: "coins.1000"
+    type: "inapp"
+    title: "1000 Coins"
+    description: "1000 virtual coins - Best Value!"
+    price_micros: 9990000  # $9.99 USD
+    currency: "USD"
+    consumable: true
+
+  # Non-consumable - One-time purchase
+  - id: "premium.unlock"
+    type: "inapp"
+    title: "Premium Unlock"
+    description: "Unlock all premium features permanently"
+    price_micros: 19990000  # $19.99 USD
+    currency: "USD"
+    consumable: false
+
+# Logging
+logging:
+  level: "INFO"
+  format: "json"
+  include_request_details: true
