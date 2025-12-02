@@ -3,6 +3,7 @@
 Implements:
 - GET /androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}
 - GET /androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}
+- POST /androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:acknowledge
 """
 
 from typing import Optional
@@ -105,7 +106,7 @@ def _convert_subscription_purchase(record: SubscriptionRecord) -> SubscriptionPu
         userCancellationTimeMillis=user_cancellation_time,
         orderId=record.order_id,
         purchaseToken=record.token,
-        acknowledgementState=0,  # Subscriptions don't track acknowledgement in our model
+        acknowledgementState=record.acknowledgement_state,
     )
 
 
@@ -669,6 +670,94 @@ async def defer_subscription(
         )
 
         return response
+
+    except SubscriptionNotFoundError:
+        logger.warning(
+            "subscription_not_found",
+            token=token[:20] + "...",
+        )
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": 404,
+                    "message": "The subscription token was not found.",
+                    "status": "NOT_FOUND",
+                }
+            },
+        )
+
+
+@router.post(
+    "/androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:acknowledge",
+    status_code=204,
+    summary="Acknowledge subscription purchase",
+)
+async def acknowledge_subscription_purchase(
+    packageName: str = Path(..., description="Android package name"),
+    subscriptionId: str = Path(..., description="Subscription product ID"),
+    token: str = Path(..., description="Purchase token"),
+):
+    """Acknowledge a subscription purchase.
+
+    Emulates: POST androidpublisher/v3/.../subscriptions/{subscriptionId}/tokens/{token}:acknowledge
+
+    This endpoint marks the subscription as acknowledged.
+
+    Args:
+        packageName: Android package name
+        subscriptionId: Subscription ID
+        token: Purchase token
+
+    Returns:
+        204 No Content on success
+
+    Raises:
+        404: Subscription not found
+    """
+    logger.info(
+        "acknowledge_subscription_request",
+        package_name=packageName,
+        subscription_id=subscriptionId,
+        token=token[:20] + "...",
+    )
+
+    try:
+        subscription = subscription_engine.get_subscription(token)
+
+        if subscription.package_name != packageName:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": 404,
+                        "message": "The subscription does not exist for this package.",
+                        "status": "NOT_FOUND",
+                    }
+                },
+            )
+
+        if subscription.subscription_id != subscriptionId:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": 404,
+                        "message": "The subscription does not exist for this product.",
+                        "status": "NOT_FOUND",
+                    }
+                },
+            )
+
+        subscription_engine.acknowledge_subscription(token)
+
+        logger.info(
+            "acknowledge_subscription_success",
+            subscription_id=subscriptionId,
+            token=token[:20] + "...",
+        )
+
+        return None  # 204 No Content
 
     except SubscriptionNotFoundError:
         logger.warning(

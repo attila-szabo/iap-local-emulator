@@ -90,6 +90,9 @@ class SubscriptionRecord(BaseModel):
     pause_start_millis: Optional[int] = Field(None, description="Pause start time")
     pause_end_millis: Optional[int] = Field(None, description="Pause end time")
 
+    # Acknowledgement
+    acknowledgement_state: int = Field(default=0, description="Acknowledgement state (0=not acknowledged, 1=acknowledged)")
+
     # Renewal count
     renewal_count: int = Field(default=0, description="Number of times renewed")
 
@@ -181,6 +184,14 @@ class SubscriptionRecord(BaseModel):
             user_id=self.user_id,
             renewal_count=self.renewal_count,
         )
+
+    def acknowledge(self) -> None:
+        """Mark subscription as acknowledged.
+
+        Idempotent operation - safe to call multiple times.
+        """
+        if self.acknowledgement_state != 1:
+            self.acknowledgement_state = 1
 
     class Config:
         json_schema_extra = {

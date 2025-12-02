@@ -881,35 +881,34 @@ class SubscriptionEngine:
             SubscriptionNotFoundError: If subscription not found
             ValueError: If new expiry is before current expiry
         """
-        with self._lock:
-            subscription = self.store.get_by_token(token)
+        subscription = self.store.get_by_token(token)
 
-            # Validate new expiry is in the future
-            if new_expiry_millis <= subscription.expiry_time_millis:
-                raise ValueError(
-                    f"New expiry time ({new_expiry_millis}) must be after "
-                    f"current expiry ({subscription.expiry_time_millis})"
-                )
-
-            # Update expiry time
-            old_expiry = subscription.expiry_time_millis
-            subscription.expiry_time_millis = new_expiry_millis
-
-            # Update in store
-            self.store.update(subscription)
-
-            logger.info(
-                "subscription_deferred",
-                token=token[:20] + "...",
-                subscription_id=subscription.subscription_id,
-                old_expiry_millis=old_expiry,
-                new_expiry_millis=new_expiry_millis,
-                deferred_by_millis=new_expiry_millis - old_expiry,
+        # Validate new expiry is in the future
+        if new_expiry_millis <= subscription.expiry_time_millis:
+            raise ValueError(
+                f"New expiry time ({new_expiry_millis}) must be after "
+                f"current expiry ({subscription.expiry_time_millis})"
             )
 
-            self._publish_event(NotificationType.SUBSCRIPTION_DEFERRED, subscription)
+        # Update expiry time
+        old_expiry = subscription.expiry_time_millis
+        subscription.expiry_time_millis = new_expiry_millis
 
-            return subscription
+        # Update in store
+        self.store.update(subscription)
+
+        logger.info(
+            "subscription_deferred",
+            token=token[:20] + "...",
+            subscription_id=subscription.subscription_id,
+            old_expiry_millis=old_expiry,
+            new_expiry_millis=new_expiry_millis,
+            deferred_by_millis=new_expiry_millis - old_expiry,
+        )
+
+        self._publish_event(NotificationType.SUBSCRIPTION_DEFERRED, subscription)
+
+        return subscription
 
     def revoke_subscription(
             self,
@@ -970,6 +969,34 @@ class SubscriptionEngine:
 
         # Publish SUBSCRIPTION_REVOKED event
         self._publish_event(NotificationType.SUBSCRIPTION_REVOKED, subscription)
+
+        return subscription
+
+    def acknowledge_subscription(self, token: str) -> SubscriptionRecord:
+        """Acknowledge a subscription purchase.
+
+        Marks the subscription as acknowledged.
+
+        Args:
+            token: Subscription token
+
+        Returns:
+            Updated SubscriptionRecord
+
+        Raises:
+            SubscriptionNotFoundError: If token not found
+        """
+        subscription = self.store.get_by_token(token)
+
+        subscription.acknowledge()
+        self.store.update(subscription)
+
+        logger.info(
+            "subscription_acknowledged",
+            token=token[:20] + "...",
+            subscription_id=subscription.subscription_id,
+            user_id=subscription.user_id,
+        )
 
         return subscription
 

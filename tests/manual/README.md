@@ -173,7 +173,53 @@ curl -X POST "http://localhost:8080/emulator/subscriptions/${TOKEN}/resume"
 # Expected event: SUBSCRIPTION_RESTARTED (7)
 ```
 
-### Scenario 6: Auto-Renewal via Time Advancement
+### Scenario 6: Subscription Acknowledgement
+
+```bash
+# Create subscription (save token)
+RESPONSE=$(curl -X POST http://localhost:8080/emulator/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_name": "com.example.app",
+    "subscription_id": "premium.personal.yearly",
+    "user_id": "user-ack-test"
+  }')
+
+# Extract token from response
+TOKEN=$(echo $RESPONSE | jq -r '.token')
+
+# Get subscription details (check acknowledgement_state = 0)
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}"
+
+# Acknowledge the subscription
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}:acknowledge"
+
+# Get subscription details again (check acknowledgement_state = 1)
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}"
+
+# Acknowledge again (should succeed - idempotent)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}:acknowledge"
+```
+
+**Expected Behavior**:
+- Initial GET returns `"acknowledgementState": 0`
+- POST returns `204 No Content`
+- Second GET returns `"acknowledgementState": 1`
+- Second POST returns `204 No Content` (idempotent)
+
+**Error Cases**:
+```bash
+# Wrong package name (404)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.wrong.package/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}:acknowledge"
+
+# Wrong subscription ID (404)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/wrong.subscription/tokens/${TOKEN}:acknowledge"
+
+# Non-existent token (404)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/invalid_token:acknowledge"
+```
+
+### Scenario 7: Auto-Renewal via Time Advancement
 
 ```bash
 # Create subscription (save token)
