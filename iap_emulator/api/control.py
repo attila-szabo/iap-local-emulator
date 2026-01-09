@@ -11,33 +11,31 @@ Implements:
 - POST /emulator/reset - Reset all state
 """
 
-from typing import Optional
 from fastapi import APIRouter, HTTPException
 
-from iap_emulator.api.google_play import defer_subscription
 from iap_emulator.logging_config import get_logger
 from iap_emulator.models import (
-    CreateSubscriptionRequest,
-    CreateSubscriptionResponse,
     AdvanceTimeRequest,
     AdvanceTimeResponse,
+    CreateSubscriptionRequest,
+    CreateSubscriptionResponse,
 )
 from iap_emulator.models.api_request import (
-    CreatePurchaseRequest,
-    CreatePurchaseResponse,
-    SetTimeRequest,
-    SetTimeResponse,
-    ResetTimeResponse,
-    ResetResponse,
-    StatusResponse,
     CancelSubscriptionRequest,
     CancelSubscriptionResponse,
-    RenewSubscriptionResponse,
+    CreatePurchaseRequest,
+    CreatePurchaseResponse,
     PauseSubscriptionRequest,
     PauseSubscriptionResponse,
-    ResumeSubscriptionResponse,
     PaymentFailedResponse,
     PaymentRecoveredResponse,
+    RenewSubscriptionResponse,
+    ResetResponse,
+    ResetTimeResponse,
+    ResumeSubscriptionResponse,
+    SetTimeRequest,
+    SetTimeResponse,
+    StatusResponse,
 )
 from iap_emulator.repositories.product_repository import ProductNotFoundError
 from iap_emulator.services.purchase_manager import get_purchase_manager
@@ -110,7 +108,7 @@ async def create_purchase(request: CreatePurchaseRequest) -> CreatePurchaseRespo
             message="Purchase created successfully",
         )
         return response
-    except ProductNotFoundError as nfe:
+    except ProductNotFoundError:
         logger.warning(
             "product_not_found",
             product_id=request.product_id,
@@ -196,7 +194,7 @@ async def create_subscription(request: CreateSubscriptionRequest) -> CreateSubsc
             message="Subscription created successfully",
         )
         return response
-    except ProductNotFoundError as e:
+    except ProductNotFoundError:
         logger.warning(
             "subscription_not_found",
             subscription_id=request.subscription_id,
@@ -542,9 +540,9 @@ async def get_status() -> StatusResponse:
     logger.debug("get_status_request")
 
     try:
+        from iap_emulator.repositories.product_repository import get_product_repository
         from iap_emulator.repositories.purchase_store import get_purchase_store
         from iap_emulator.repositories.subscription_store import get_subscription_store
-        from iap_emulator.repositories.product_repository import get_product_repository
 
         purchase_store = get_purchase_store()
         subscription_store = get_subscription_store()
@@ -710,8 +708,8 @@ async def cancel_subscription_control(
     )
 
     try:
-        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
         from iap_emulator.models.subscription import CancelReason
+        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 
         # Map cancel reason int to enum
         reason_map = {
@@ -788,10 +786,10 @@ async def simulate_payment_failure(token: str) -> PaymentFailedResponse:
     )
 
     try:
-        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
-
         # Get current time
         import time
+
+        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 
         current_time = int(time.time() * 1000)
 
@@ -871,10 +869,10 @@ async def recover_payment(token: str) -> PaymentRecoveredResponse:
     )
 
     try:
-        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
-
         # Get current time
         import time
+
+        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 
         current_time = int(time.time() * 1000)
 
@@ -957,10 +955,10 @@ async def pause_subscription(
     )
 
     try:
-        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
-
         # Get current time
         import time
+
+        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 
         current_time = int(time.time() * 1000)
 
@@ -1042,10 +1040,10 @@ async def resume_subscription(token: str) -> ResumeSubscriptionResponse:
     )
 
     try:
-        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
-
         # Get current time
         import time
+
+        from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 
         current_time = int(time.time() * 1000)
 

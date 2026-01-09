@@ -7,8 +7,8 @@ Responsibilities:
 - Process subscriptions due for renewal/expiration
 """
 
-import time
 import threading
+import time
 from typing import Optional
 
 from iap_emulator.state_logger import get_logger

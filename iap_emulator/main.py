@@ -1,14 +1,13 @@
 """FastAPI application entry point and lifecycle management."""
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from iap_emulator.config import get_config
 from iap_emulator.logging_config import configure_logging, get_logger
 from iap_emulator.middleware import ContextMiddleware, RequestLoggingMiddleware
 
@@ -87,8 +86,8 @@ def create_app() -> FastAPI:
     app.add_middleware(ContextMiddleware)
 
     # Register routers
-    from iap_emulator.api.google_play import router as google_play_router
     from iap_emulator.api.control import router as control_router
+    from iap_emulator.api.google_play import router as google_play_router
 
     app.include_router(google_play_router)
     app.include_router(control_router)
@@ -108,8 +107,8 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         """Detailed health check."""
-        from iap_emulator.services.event_dispatcher import get_event_dispatcher
         from iap_emulator.repositories.product_repository import get_product_repository
+        from iap_emulator.services.event_dispatcher import get_event_dispatcher
 
         dispatcher = get_event_dispatcher()
         product_repo = get_product_repository()

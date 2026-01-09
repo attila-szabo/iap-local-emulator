@@ -6,7 +6,6 @@ from threading import Thread
 import pytest
 
 from iap_emulator.models.purchase import (
-    AcknowledgementState,
     ConsumptionState,
     ProductPurchaseRecord,
     PurchaseState,

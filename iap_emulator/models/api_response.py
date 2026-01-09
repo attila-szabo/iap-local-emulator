@@ -4,6 +4,7 @@ ProductPurchase and SubscriptionPurchase response formats.
 """
 
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 

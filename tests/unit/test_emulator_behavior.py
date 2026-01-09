@@ -6,7 +6,7 @@ subscription behavior configuration like grace period, account hold, and prorati
 
 import pytest
 
-from iap_emulator.config import Config, get_config
+from iap_emulator.config import get_config
 
 
 @pytest.fixture

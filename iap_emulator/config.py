@@ -58,7 +58,7 @@ class Config:
             )
 
         try:
-            with open(self._config_path, "r", encoding="utf-8") as f:
+            with open(self._config_path, encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f)
 
             if not raw_config:

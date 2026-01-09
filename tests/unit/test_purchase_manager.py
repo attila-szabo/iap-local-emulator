@@ -9,7 +9,6 @@ from iap_emulator.models.product import ProductDefinition
 from iap_emulator.models.purchase import (
     AcknowledgementState,
     ConsumptionState,
-    ProductPurchaseRecord,
     PurchaseState,
 )
 from iap_emulator.repositories.product_repository import (

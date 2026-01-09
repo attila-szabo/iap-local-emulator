@@ -1,20 +1,18 @@
 """Integration tests for complete subscription lifecycle scenarios."""
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from iap_emulator.models.product import ProductDefinition
 from iap_emulator.models.subscription import (
-    SubscriptionState,
     PaymentState,
-    CancelReason,
+    SubscriptionState,
 )
 from iap_emulator.repositories.product_repository import ProductRepository
 from iap_emulator.repositories.subscription_store import SubscriptionStore
 from iap_emulator.services.subscription_engine import SubscriptionEngine
 from iap_emulator.services.time_controller import TimeController
-from iap_emulator.utils.billing_period import parse_billing_period
+
 
 @pytest.fixture
 def mock_config():

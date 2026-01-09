@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Verify Pub/Sub resources for RTDN testing.
 
 This script checks that the required Pub/Sub topic and subscription exist
@@ -62,7 +61,7 @@ def main():
 
             if not found_expected:
                 print(f"\n  ✗ Expected topic not found: {expected_topic_path}")
-                print(f"    The IAP emulator should create this on startup.")
+                print("    The IAP emulator should create this on startup.")
                 sys.exit(1)
         else:
             print("  ✗ No topics found")
@@ -91,7 +90,7 @@ def main():
 
             if not found_expected:
                 print(f"\n  ✗ Expected subscription not found: {expected_sub_path}")
-                print(f"    The IAP emulator should create this on startup.")
+                print("    The IAP emulator should create this on startup.")
                 sys.exit(1)
         else:
             print("  ✗ No subscriptions found")

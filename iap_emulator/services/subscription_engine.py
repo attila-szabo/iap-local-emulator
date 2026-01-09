@@ -16,17 +16,16 @@ from iap_emulator.config import get_config
 from iap_emulator.logging_config import get_logger
 from iap_emulator.models.subscription import (
     CancelReason,
+    NotificationType,
     PaymentState,
     SubscriptionRecord,
     SubscriptionState,
 )
 from iap_emulator.repositories.product_repository import (
-    ProductNotFoundError,
     ProductRepository,
     get_product_repository,
 )
 from iap_emulator.repositories.subscription_store import (
-    SubscriptionNotFoundError,
     SubscriptionStore,
     get_subscription_store,
 )
@@ -35,8 +34,6 @@ from iap_emulator.utils.token_generator import (
     generate_order_id,
     generate_subscription_token,
 )
-from iap_emulator.models.subscription import NotificationType
-from iap_emulator.services.event_dispatcher import get_event_dispatcher
 
 logger = get_logger(__name__)
 

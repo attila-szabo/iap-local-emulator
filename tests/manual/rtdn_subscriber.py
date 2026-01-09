@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Subscribe to RTDN events from the IAP Emulator.
 
 This script listens for Real-Time Developer Notifications published by the

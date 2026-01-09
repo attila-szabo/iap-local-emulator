@@ -4,6 +4,7 @@ Maps to Google Play Real-time Developer Notifications schema.
 """
 
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from .subscription import NotificationType

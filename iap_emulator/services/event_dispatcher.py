@@ -7,16 +7,17 @@ Responsibilities:
 - Manage Pub/Sub client lifecycle
 """
 
-import json
-from typing import Optional
 from threading import RLock
+from typing import Optional
 
 from google.cloud import pubsub_v1
-from google.api_core import retry
-from google.api_core.exceptions import GoogleAPIError
 
 from iap_emulator.logging_config import get_logger
-from iap_emulator.models.events import DeveloperNotification, SubscriptionNotification, OneTimeProductNotification
+from iap_emulator.models.events import (
+    DeveloperNotification,
+    OneTimeProductNotification,
+    SubscriptionNotification,
+)
 from iap_emulator.models.subscription import NotificationType
 from iap_emulator.repositories.product_repository import get_product_repository
 from iap_emulator.services.time_controller import get_time_controller

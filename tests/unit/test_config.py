@@ -2,7 +2,7 @@
 
 import pytest
 
-from iap_emulator.config import Config, ConfigurationError, get_config
+from iap_emulator.config import Config, get_config
 
 
 @pytest.fixture

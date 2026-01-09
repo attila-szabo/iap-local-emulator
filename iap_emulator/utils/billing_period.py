@@ -6,8 +6,6 @@ and converts them to milliseconds for time calculations.
 
 import re
 from datetime import timedelta
-from typing import Optional
-
 
 # Milliseconds in common time units
 MILLIS_PER_SECOND = 1000

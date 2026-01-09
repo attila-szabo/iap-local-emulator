@@ -13,12 +13,10 @@ from iap_emulator.models.purchase import (
     PurchaseState,
 )
 from iap_emulator.repositories.product_repository import (
-    ProductNotFoundError,
     ProductRepository,
     get_product_repository,
 )
 from iap_emulator.repositories.purchase_store import (
-    PurchaseNotFoundError,
     PurchaseStore,
     get_purchase_store,
 )

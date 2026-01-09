@@ -1,9 +1,12 @@
 """Unit tests for EventDispatcher service."""
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from google.cloud import pubsub_v1
-from iap_emulator.services.event_dispatcher import EventDispatcher, get_event_dispatcher, reset_event_dispatcher
+from unittest.mock import Mock, patch
+
 from iap_emulator.models.subscription import NotificationType
+from iap_emulator.services.event_dispatcher import (
+    EventDispatcher,
+    get_event_dispatcher,
+    reset_event_dispatcher,
+)
 
 
 class TestEventDispatcherInitialization:

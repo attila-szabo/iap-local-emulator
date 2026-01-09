@@ -6,7 +6,6 @@ from threading import Thread
 import pytest
 
 from iap_emulator.models.subscription import (
-    PaymentState,
     SubscriptionRecord,
     SubscriptionState,
 )
