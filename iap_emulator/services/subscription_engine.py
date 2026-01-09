@@ -1000,6 +1000,39 @@ class SubscriptionEngine:
 
         return subscription
 
+    def refund_subscription(self, order_id: str) -> SubscriptionRecord:
+        """Refund a subscription by order ID.
+
+        Refunding a subscription revokes it immediately (user loses access).
+
+        Args:
+            order_id: Order ID to refund
+
+        Returns:
+            Updated SubscriptionRecord
+
+        Raises:
+            SubscriptionNotFoundError: If order ID not found
+        """
+        subscription = self.store.get_by_order_id(order_id)
+
+        # Refund uses revoke mechanism (immediate cancellation)
+        return self.revoke_subscription(subscription.token)
+
+    def get_subscription_by_order_id(self, order_id: str) -> SubscriptionRecord:
+        """Get subscription by order ID.
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            SubscriptionRecord
+
+        Raises:
+            SubscriptionNotFoundError: If order ID not found
+        """
+        return self.store.get_by_order_id(order_id)
+
 
 # Global engine instance
 _engine_instance: Optional[SubscriptionEngine] = None

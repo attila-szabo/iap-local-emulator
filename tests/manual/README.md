@@ -9,6 +9,7 @@ The IAP Emulator publishes RTDN events to Google Cloud Pub/Sub when subscription
 ## Prerequisites
 
 1. **Pub/Sub Emulator** running on `localhost:8085`:
+
    ```bash
    docker run -d --name pubsub-emulator \
      -p 8085:8085 \
@@ -37,10 +38,12 @@ PUBSUB_EMULATOR_HOST=localhost:8085 python -m iap_emulator
 ```
 
 The emulator will automatically:
+
 - Create Pub/Sub topic: `projects/emulator-project/topics/iap_rtdn`
 - Create subscription: `projects/emulator-project/subscriptions/iap_rtdn_sub`
 
 Verify initialization in the logs:
+
 ```
 {"event": "pubsub_topic_exists", "topic": "iap_rtdn"}
 {"event": "pubsub_subscription_created", "subscription": "iap_rtdn_sub"}
@@ -58,6 +61,7 @@ python tests/manual/check_pubsub.py
 ```
 
 Expected output:
+
 ```
 ✓ Pub/Sub Emulator: localhost:8085
 ✓ Topic: projects/emulator-project/topics/iap_rtdn
@@ -75,6 +79,7 @@ python tests/manual/rtdn_subscriber.py
 ```
 
 You should see:
+
 ```
 🎧 Listening for RTDN events...
    Project: emulator-project
@@ -98,6 +103,7 @@ curl -X POST http://localhost:8080/emulator/subscriptions \
 ```
 
 The subscriber should display:
+
 ```
 ━━━ RTDN Event Received ━━━
 Package: com.example.app
@@ -202,12 +208,14 @@ curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example
 ```
 
 **Expected Behavior**:
+
 - Initial GET returns `"acknowledgementState": 0`
 - POST returns `204 No Content`
 - Second GET returns `"acknowledgementState": 1`
 - Second POST returns `204 No Content` (idempotent)
 
 **Error Cases**:
+
 ```bash
 # Wrong package name (404)
 curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.wrong.package/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}:acknowledge"
@@ -238,14 +246,162 @@ curl -X POST http://localhost:8080/emulator/time/advance \
 ```
 
 **Expected Events**:
+
 1. `SUBSCRIPTION_PURCHASED (4)` - from creation
 2. `SUBSCRIPTION_RENEWED (2)` - from time advancement
+
+### Scenario 8: Refund Product Purchase
+
+```bash
+# Create a product purchase (save token and order_id)
+RESPONSE=$(curl -X POST http://localhost:8080/emulator/purchases \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_name": "com.example.app",
+    "product_id": "premium.personal.yearly",
+    "user_id": "user-refund-product-001"
+  }')
+
+# Extract token and order_id from response
+TOKEN=$(echo $RESPONSE | jq -r '.token')
+ORDER_ID=$(echo $RESPONSE | jq -r '.order_id')
+
+# Verify purchase state (should be PURCHASED = 0)
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/products/premium.personal.yearly/tokens/${TOKEN}"
+
+# Refund the purchase
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/orders/${ORDER_ID}:refund"
+
+# Verify purchase was refunded (state should be CANCELED = 1)
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/products/premium.personal.yearly/tokens/${TOKEN}"
+```
+
+**Expected Behavior**:
+
+- Initial GET returns `"purchaseState": 0` (PURCHASED)
+- POST returns `204 No Content`
+- Second GET returns `"purchaseState": 1` (CANCELED)
+
+### Scenario 9: Refund Subscription
+
+```bash
+# Create a subscription (save token and order_id)
+RESPONSE=$(curl -X POST http://localhost:8080/emulator/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_name": "com.example.app",
+    "subscription_id": "premium.personal.yearly",
+    "user_id": "user-refund-sub-001"
+  }')
+
+# Extract order_id from response
+ORDER_ID=$(echo $RESPONSE | jq -r '.order_id')
+TOKEN=$(echo $RESPONSE | jq -r '.token')
+
+# Verify subscription is ACTIVE
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}"
+
+# Refund the subscription (revokes immediately)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/orders/${ORDER_ID}:refund"
+
+# Verify subscription was revoked (should be EXPIRED)
+curl -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}"
+```
+
+**Expected Behavior**:
+
+- Initial GET shows subscription in ACTIVE state with `"autoRenewing": true`
+- POST returns `204 No Content`
+- Second GET shows subscription in EXPIRED state with `"autoRenewing": false`
+
+**Expected Event**: `SUBSCRIPTION_REVOKED (12)` - published to Pub/Sub
+
+### Scenario 10: Refund with Optional Revoke Parameter
+
+```bash
+# The revoke parameter is optional (defaults to false for products, immediate revoke for subscriptions)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/orders/${ORDER_ID}:refund?revoke=true"
+```
+
+**Expected Behavior**:
+
+- For subscriptions: Immediately revokes access (same as without parameter)
+- For products: Sets state to CANCELED
+
+### Error Cases for Refund
+
+```bash
+# Non-existent order ID (404)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/orders/INVALID-ORDER-ID:refund"
+
+# Expected: 404 with error message "The order was not found."
+
+# Wrong package name (404)
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.wrong.package/orders/${ORDER_ID}:refund"
+
+# Expected: 404 with error message "The order does not exist for this package."
+```
+
+**Error Response Format**:
+
+```json
+{
+  "detail": {
+    "error": {
+      "code": 404,
+      "message": "The order was not found.",
+      "status": "NOT_FOUND"
+    }
+  }
+}
+```
+
+### Complete Refund Workflow Example
+
+```bash
+# 1. Create a subscription
+RESPONSE=$(curl -s -X POST http://localhost:8080/emulator/subscriptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "package_name": "com.example.app",
+    "subscription_id": "premium.personal.yearly",
+    "user_id": "user-complete-refund-test"
+  }')
+
+echo "Subscription created:"
+echo $RESPONSE | jq '.'
+
+# 2. Extract tokens
+TOKEN=$(echo $RESPONSE | jq -r '.token')
+ORDER_ID=$(echo $RESPONSE | jq -r '.order_id')
+
+echo "\nToken: $TOKEN"
+echo "Order ID: $ORDER_ID"
+
+# 3. Query subscription status
+echo "\n--- Before Refund ---"
+curl -s -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}" | jq '{autoRenewing, expiryTimeMillis}'
+
+# 4. Refund the order
+echo "\n--- Refunding Order ---"
+curl -X POST "http://localhost:8080/androidpublisher/v3/applications/com.example.app/orders/${ORDER_ID}:refund"
+
+# 5. Verify refund
+echo "\n--- After Refund ---"
+curl -s -X GET "http://localhost:8080/androidpublisher/v3/applications/com.example.app/purchases/subscriptions/premium.personal.yearly/tokens/${TOKEN}" | jq '{autoRenewing, expiryTimeMillis, cancelReason}'
+
+# Expected Output:
+# - Before: autoRenewing=true, expiryTimeMillis=<future timestamp>
+# - After: autoRenewing=false, expiryTimeMillis=<current timestamp>, cancelReason=1 (SYSTEM_CANCELED)
+```
 
 ## Troubleshooting
 
 ### Problem: "PUBSUB_EMULATOR_HOST not set"
 
+w
 **Solution**: Export the environment variable before running scripts:
+
 ```bash
 export PUBSUB_EMULATOR_HOST=localhost:8085
 ```
@@ -253,6 +409,7 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 ### Problem: No events received by subscriber
 
 **Checks**:
+
 1. Verify emulator was started with `PUBSUB_EMULATOR_HOST` set
 2. Check emulator logs for `"event": "subscription_event_published"`
 3. Restart the emulator if it was started without the env var
@@ -266,6 +423,7 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 ### Problem: Emulator can't connect to Pub/Sub
 
 **Checks**:
+
 1. Verify Pub/Sub emulator is running:
    ```bash
    docker ps | grep pubsub
@@ -283,21 +441,21 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 
 ## RTDN Event Types
 
-| Event Type | Code | Description |
-|------------|------|-------------|
-| SUBSCRIPTION_RECOVERED | 1 | Payment recovered after failure |
-| SUBSCRIPTION_RENEWED | 2 | Subscription auto-renewed |
-| SUBSCRIPTION_CANCELED | 3 | Subscription canceled (deferred) |
-| SUBSCRIPTION_PURCHASED | 4 | New subscription created |
-| SUBSCRIPTION_ON_HOLD | 5 | Grace period expired, on hold |
-| SUBSCRIPTION_IN_GRACE_PERIOD | 6 | Payment failed, in grace period |
-| SUBSCRIPTION_RESTARTED | 7 | Subscription resumed |
-| SUBSCRIPTION_PRICE_CHANGE_CONFIRMED | 8 | Not implemented |
-| SUBSCRIPTION_DEFERRED | 9 | Renewal deferred |
-| SUBSCRIPTION_PAUSED | 10 | Subscription paused |
-| SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED | 11 | Not implemented |
-| SUBSCRIPTION_REVOKED | 12 | Subscription revoked |
-| SUBSCRIPTION_EXPIRED | 13 | Subscription expired (immediate) |
+| Event Type                          | Code | Description                      |
+| ----------------------------------- | ---- | -------------------------------- |
+| SUBSCRIPTION_RECOVERED              | 1    | Payment recovered after failure  |
+| SUBSCRIPTION_RENEWED                | 2    | Subscription auto-renewed        |
+| SUBSCRIPTION_CANCELED               | 3    | Subscription canceled (deferred) |
+| SUBSCRIPTION_PURCHASED              | 4    | New subscription created         |
+| SUBSCRIPTION_ON_HOLD                | 5    | Grace period expired, on hold    |
+| SUBSCRIPTION_IN_GRACE_PERIOD        | 6    | Payment failed, in grace period  |
+| SUBSCRIPTION_RESTARTED              | 7    | Subscription resumed             |
+| SUBSCRIPTION_PRICE_CHANGE_CONFIRMED | 8    | Not implemented                  |
+| SUBSCRIPTION_DEFERRED               | 9    | Renewal deferred                 |
+| SUBSCRIPTION_PAUSED                 | 10   | Subscription paused              |
+| SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED | 11   | Not implemented                  |
+| SUBSCRIPTION_REVOKED                | 12   | Subscription revoked             |
+| SUBSCRIPTION_EXPIRED                | 13   | Subscription expired (immediate) |
 
 ## Cleanup
 

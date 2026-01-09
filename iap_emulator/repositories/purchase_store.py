@@ -112,6 +112,39 @@ class PurchaseStore:
         with self._lock:
             return [p for p in self._purchases.values() if p.product_id == product_id]
 
+    def get_by_order_id(self, order_id: str) -> ProductPurchaseRecord:
+        """Get purchase by order ID.
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            ProductPurchaseRecord
+
+        Raises:
+            PurchaseNotFoundError: If order ID not found
+        """
+        with self._lock:
+            for purchase in self._purchases.values():
+                if purchase.order_id == order_id:
+                    return purchase
+            raise PurchaseNotFoundError(f"Purchase not found for order ID: {order_id}")
+
+    def find_by_order_id(self, order_id: str) -> Optional[ProductPurchaseRecord]:
+        """Find purchase by order ID (returns None if not found).
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            ProductPurchaseRecord if found, None otherwise
+        """
+        with self._lock:
+            for purchase in self._purchases.values():
+                if purchase.order_id == order_id:
+                    return purchase
+            return None
+
     def get_user_purchase(
         self, user_id: str, product_id: str, package_name: str
     ) -> Optional[ProductPurchaseRecord]:

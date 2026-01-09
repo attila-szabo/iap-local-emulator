@@ -263,3 +263,114 @@ def test_get_subscription_returns_acknowledgement_state(client, subscription_eng
     assert response2.status_code == 200
     data2 = response2.json()
     assert data2["acknowledgementState"] == 1  # ACKNOWLEDGED
+
+
+def test_refund_product_purchase_success(client, purchase_manager):
+    """Test POST refund order for product purchase - happy path."""
+    # Create a test purchase
+    purchase = purchase_manager.create_purchase(
+        product_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-refund-product",
+    )
+
+    # Verify initial state
+    assert purchase.purchase_state.value == 0  # PURCHASED
+
+    # Refund via API
+    response = client.post(
+        f"/androidpublisher/v3/applications/com.example.secureapp/orders/{purchase.order_id}:refund"
+    )
+
+    # Verify response
+    assert response.status_code == 204  # No Content
+    assert response.text == ""
+
+    # Verify purchase was refunded (state changed to CANCELED)
+    updated_purchase = purchase_manager.get_purchase(purchase.token)
+    assert updated_purchase.purchase_state.value == 1  # CANCELED
+
+
+def test_refund_subscription_success(client, subscription_engine):
+    """Test POST refund order for subscription - happy path."""
+    from iap_emulator.models.subscription import SubscriptionState
+
+    # Create a test subscription
+    subscription = subscription_engine.create_subscription(
+        subscription_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-refund-subscription",
+    )
+
+    # Verify initial state
+    assert subscription.state == SubscriptionState.ACTIVE
+
+    # Refund via API
+    response = client.post(
+        f"/androidpublisher/v3/applications/com.example.secureapp/orders/{subscription.order_id}:refund"
+    )
+
+    # Verify response
+    assert response.status_code == 204  # No Content
+    assert response.text == ""
+
+    # Verify subscription was refunded (revoked - state changed to EXPIRED)
+    updated_subscription = subscription_engine.get_subscription(subscription.token)
+    assert updated_subscription.state == SubscriptionState.EXPIRED
+
+
+def test_refund_order_not_found(client):
+    """Test refunding a non-existent order returns 404."""
+    response = client.post(
+        "/androidpublisher/v3/applications/com.example.secureapp/orders/nonexistent_order_id:refund"
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert data["detail"]["error"]["code"] == 404
+    assert data["detail"]["error"]["status"] == "NOT_FOUND"
+    assert "not found" in data["detail"]["error"]["message"].lower()
+
+
+def test_refund_order_package_mismatch(client, purchase_manager):
+    """Test refunding with wrong package name returns 404."""
+    # Create a test purchase
+    purchase = purchase_manager.create_purchase(
+        product_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-refund-mismatch",
+    )
+
+    # Try to refund with wrong package name
+    response = client.post(
+        f"/androidpublisher/v3/applications/com.wrong.package/orders/{purchase.order_id}:refund"
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert data["detail"]["error"]["code"] == 404
+    assert "package" in data["detail"]["error"]["message"].lower()
+
+
+def test_refund_order_with_revoke_parameter(client, subscription_engine):
+    """Test refunding with revoke parameter (subscriptions)."""
+    from iap_emulator.models.subscription import SubscriptionState
+
+    # Create a test subscription
+    subscription = subscription_engine.create_subscription(
+        subscription_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-refund-revoke",
+    )
+
+    # Refund via API with revoke=true
+    response = client.post(
+        f"/androidpublisher/v3/applications/com.example.secureapp/orders/{subscription.order_id}:refund?revoke=true"
+    )
+
+    # Verify response
+    assert response.status_code == 204  # No Content
+
+    # Verify subscription was revoked
+    updated_subscription = subscription_engine.get_subscription(subscription.token)
+    assert updated_subscription.state == SubscriptionState.EXPIRED

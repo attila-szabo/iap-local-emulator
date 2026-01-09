@@ -117,6 +117,39 @@ class SubscriptionStore:
                 if s.subscription_id == subscription_id
             ]
 
+    def get_by_order_id(self, order_id: str) -> SubscriptionRecord:
+        """Get subscription by order ID.
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            SubscriptionRecord
+
+        Raises:
+            SubscriptionNotFoundError: If order ID not found
+        """
+        with self._lock:
+            for subscription in self._subscriptions.values():
+                if subscription.order_id == order_id:
+                    return subscription
+            raise SubscriptionNotFoundError(f"Subscription not found for order ID: {order_id}")
+
+    def find_by_order_id(self, order_id: str) -> Optional[SubscriptionRecord]:
+        """Find subscription by order ID (returns None if not found).
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            SubscriptionRecord if found, None otherwise
+        """
+        with self._lock:
+            for subscription in self._subscriptions.values():
+                if subscription.order_id == order_id:
+                    return subscription
+            return None
+
     def get_user_subscription(
         self, user_id: str, subscription_id: str, package_name: str
     ) -> Optional[SubscriptionRecord]:

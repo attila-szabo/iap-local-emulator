@@ -99,7 +99,7 @@ async def create_purchase(request: CreatePurchaseRequest) -> CreatePurchaseRespo
         )
 
         response = CreatePurchaseResponse(
-            token=purchase.token[:20] + "...",
+            token=purchase.token,
             product_id=purchase.product_id,
             user_id=purchase.user_id,
             order_id=purchase.order_id,

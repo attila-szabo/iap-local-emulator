@@ -4,10 +4,11 @@ Implements:
 - GET /androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}
 - GET /androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}
 - POST /androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:acknowledge
+- POST /androidpublisher/v3/applications/{packageName}/orders/{orderId}:refund
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query
 from iap_emulator.logging_config import get_logger
 from iap_emulator.models import (
     ProductPurchaseRecord,
@@ -770,6 +771,134 @@ async def acknowledge_subscription_purchase(
                 "error": {
                     "code": 404,
                     "message": "The subscription token was not found.",
+                    "status": "NOT_FOUND",
+                }
+            },
+        )
+
+
+@router.post(
+    "/androidpublisher/v3/applications/{packageName}/orders/{orderId}:refund",
+    status_code=204,
+    summary="Refund an order",
+)
+async def refund_order(
+    packageName: str = Path(..., description="Android package name"),
+    orderId: str = Path(..., description="Order ID"),
+    revoke: bool = Query(False, description="Whether to revoke access immediately (subscriptions only)"),
+) -> None:
+    """Refund an order (product purchase or subscription).
+
+    Emulates: POST androidpublisher/v3/applications/{packageName}/orders/{orderId}:refund
+
+    This endpoint works for both product purchases and subscriptions.
+    For products, refunding sets the purchase state to CANCELED.
+    For subscriptions, refunding revokes the subscription immediately.
+
+    Args:
+        packageName: Android package name
+        orderId: Order ID to refund
+        revoke: Whether to revoke access immediately (applies to subscriptions)
+
+    Returns:
+        204 No Content on success
+
+    Raises:
+        404: Order not found
+    """
+    logger.info(
+        "refund_order_request",
+        package_name=packageName,
+        order_id=orderId,
+        revoke=revoke,
+    )
+
+    # Try to find the order in products first
+    try:
+        purchase = purchase_manager.get_purchase_by_order_id(orderId)
+
+        # Validate package name
+        if purchase.package_name != packageName:
+            logger.warning(
+                "package_name_mismatch_refund",
+                expected=packageName,
+                actual=purchase.package_name,
+                order_id=orderId,
+            )
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": 404,
+                        "message": "The order does not exist for this package.",
+                        "status": "NOT_FOUND",
+                    }
+                },
+            )
+
+        # Refund the product purchase
+        purchase_manager.refund_purchase(orderId)
+
+        logger.info(
+            "refund_order_success",
+            order_id=orderId,
+            order_type="product",
+            product_id=purchase.product_id,
+        )
+
+        return None  # 204 No Content
+
+    except PurchaseNotFoundError:
+        # Not a product purchase, try subscription
+        pass
+
+    # Try to find the order in subscriptions
+    try:
+        subscription = subscription_engine.get_subscription_by_order_id(orderId)
+
+        # Validate package name
+        if subscription.package_name != packageName:
+            logger.warning(
+                "package_name_mismatch_refund",
+                expected=packageName,
+                actual=subscription.package_name,
+                order_id=orderId,
+            )
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": 404,
+                        "message": "The order does not exist for this package.",
+                        "status": "NOT_FOUND",
+                    }
+                },
+            )
+
+        # Refund the subscription (revokes immediately)
+        subscription_engine.refund_subscription(orderId)
+
+        logger.info(
+            "refund_order_success",
+            order_id=orderId,
+            order_type="subscription",
+            subscription_id=subscription.subscription_id,
+        )
+
+        return None  # 204 No Content
+
+    except SubscriptionNotFoundError:
+        # Order not found in either products or subscriptions
+        logger.warning(
+            "order_not_found_refund",
+            order_id=orderId,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": 404,
+                    "message": "The order was not found.",
                     "status": "NOT_FOUND",
                 }
             },

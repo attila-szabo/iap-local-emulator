@@ -273,6 +273,39 @@ class PurchaseManager:
 
         return purchase
 
+    def refund_purchase(self, order_id: str) -> ProductPurchaseRecord:
+        """Refund a purchase by order ID.
+
+        Args:
+            order_id: Order ID to refund
+
+        Returns:
+            Updated ProductPurchaseRecord
+
+        Raises:
+            PurchaseNotFoundError: If order ID not found
+        """
+        purchase = self._purchase_store.get_by_order_id(order_id)
+
+        # Update purchase state to CANCELED with refund reason
+        purchase.set_purchase_state(PurchaseState.CANCELED, reason="refunded")
+
+        return purchase
+
+    def get_purchase_by_order_id(self, order_id: str) -> ProductPurchaseRecord:
+        """Get purchase by order ID.
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            ProductPurchaseRecord
+
+        Raises:
+            PurchaseNotFoundError: If order ID not found
+        """
+        return self._purchase_store.get_by_order_id(order_id)
+
     def get_user_purchases(self, user_id: str) -> list[ProductPurchaseRecord]:
         """Get all purchases for a user.
 
