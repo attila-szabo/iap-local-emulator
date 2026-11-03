@@ -9,7 +9,6 @@ Responsibilities:
 - Calculate expiry times and billing periods
 """
 
-import time
 from typing import Optional
 
 from iap_emulator.config import get_config
@@ -69,8 +68,16 @@ class SubscriptionEngine:
             subscription_store: Subscription storage (defaults to global instance)
             product_repository: Product repository (defaults to global instance)
         """
-        self.store = subscription_store or get_subscription_store()
-        self.product_repo = product_repository or get_product_repository()
+        self.store = (
+            subscription_store
+            if subscription_store is not None
+            else get_subscription_store()
+        )
+        self.product_repo = (
+            product_repository
+            if product_repository is not None
+            else get_product_repository()
+        )
         self.config = get_config()
         self._time_controller = None  # Lazy loaded to avoid circular import
         self._event_dispatcher = None  # Lazy loaded to avoid circular import
@@ -83,6 +90,14 @@ class SubscriptionEngine:
             from iap_emulator.services.time_controller import get_time_controller
             self._time_controller = get_time_controller()
         return self._time_controller
+
+    def attach_time_controller(self, time_controller) -> None:
+        """Use the given controller as the engine's virtual clock."""
+        self._time_controller = time_controller
+
+    def _now_millis(self) -> int:
+        """Current virtual time in milliseconds."""
+        return self._get_time_controller().get_current_time_millis()
 
     def _get_event_dispatcher(self):
         """lazy load event dispatcher to avoid circular import"""
@@ -173,7 +188,7 @@ class SubscriptionEngine:
 
         # Determine start time
         if start_time_millis is None:
-            start_time_millis = int(time.time() * 1000)
+            start_time_millis = self._now_millis()
 
         # Calculate expiry time
         trial_expiry_millis = None
@@ -268,7 +283,7 @@ class SubscriptionEngine:
             )
 
         # Mark as canceled
-        canceled_time_millis = int(time.time() * 1000)
+        canceled_time_millis = self._now_millis()
         subscription.canceled_time_millis = canceled_time_millis
         subscription.cancel_reason = cancel_reason
         subscription.set_auto_renewing(
@@ -344,7 +359,7 @@ class SubscriptionEngine:
             )
 
         # Set pause times
-        current_time_millis = int(time.time() * 1000)
+        current_time_millis = self._now_millis()
         subscription.pause_start_millis = current_time_millis
         subscription.pause_end_millis = current_time_millis + pause_duration_millis
 
@@ -403,7 +418,7 @@ class SubscriptionEngine:
             )
 
         # Calculate how much pause time was actually used
-        current_time_millis = int(time.time() * 1000)
+        current_time_millis = self._now_millis()
         if subscription.pause_start_millis:
             actual_pause_duration = (
                     current_time_millis - subscription.pause_start_millis
@@ -652,7 +667,7 @@ class SubscriptionEngine:
 
         # Determine failure time
         if failure_time_millis is None:
-            failure_time_millis = int(time.time() * 1000)
+            failure_time_millis = self._now_millis()
 
         # Calculate grace period end
         grace_period_millis = parse_billing_period(product.grace_period)
@@ -718,7 +733,7 @@ class SubscriptionEngine:
 
         # Determine hold start time
         if hold_time_millis is None:
-            hold_time_millis = int(time.time() * 1000)
+            hold_time_millis = self._now_millis()
 
         # Set account hold start time
         subscription.account_hold_start_millis = hold_time_millis
@@ -783,13 +798,24 @@ class SubscriptionEngine:
 
         # Determine recovery time
         if recovery_time_millis is None:
-            recovery_time_millis = int(time.time() * 1000)
+            recovery_time_millis = self._now_millis()
 
         # Update payment state to received
         subscription.set_payment_state(
             PaymentState.PAYMENT_RECEIVED,
             reason="Payment recovered",
         )
+
+        # A lapsed subscription starts a fresh billing period at recovery, so
+        # catch-up renewals never bill for the time spent on hold
+        if subscription.expiry_time_millis <= recovery_time_millis:
+            billing_period = self.product_repo.get_by_id(
+                subscription.subscription_id
+            ).billing_period
+            subscription.extend_expiry(
+                recovery_time_millis + parse_billing_period(billing_period),
+                reason="Recovered after lapse",
+            )
 
         # Clear grace period and hold markers
         subscription.grace_period_end_millis = None
@@ -863,6 +889,44 @@ class SubscriptionEngine:
             )
 
         return transitioned
+
+    def process_expirations(
+            self,
+            current_time_millis: int,
+    ) -> list[SubscriptionRecord]:
+        """Expire canceled subscriptions whose paid period has ended.
+
+        A canceled subscription keeps access until its expiry time; once the
+        virtual clock reaches it, the subscription becomes EXPIRED and a
+        SUBSCRIPTION_EXPIRED event is published.
+
+        Args:
+            current_time_millis: Current virtual time to check against
+
+        Returns:
+            List of subscriptions transitioned to EXPIRED
+        """
+        expired = []
+
+        for subscription in self.store.get_by_state(SubscriptionState.CANCELED):
+            if current_time_millis < subscription.expiry_time_millis:
+                continue
+            subscription.set_state(
+                SubscriptionState.EXPIRED,
+                reason="Canceled subscription reached expiry",
+            )
+            self.store.update(subscription)
+            self._publish_event(NotificationType.SUBSCRIPTION_EXPIRED, subscription)
+            expired.append(subscription)
+
+        if expired:
+            logger.info(
+                "expirations_processed",
+                count=len(expired),
+                current_time=current_time_millis,
+            )
+
+        return expired
 
     def defer_subscription(self, token: str, new_expiry_millis: int) -> SubscriptionRecord:
         """Defer subscription renewal by extending expiry time.
@@ -939,7 +1003,7 @@ class SubscriptionEngine:
 
         # Determine revoke time
         if revoke_time_millis is None:
-            revoke_time_millis = int(time.time() * 1000)
+            revoke_time_millis = self._now_millis()
 
         # Mark as revoked (use canceled fields for tracking)
         subscription.canceled_time_millis = revoke_time_millis
