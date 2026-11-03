@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 
 from iap_emulator.logging_config import get_logger
 from iap_emulator.models import (
+    CancelReason,
     PaymentState,
     ProductPurchaseRecord,
     SubscriptionRecord,
@@ -23,7 +24,10 @@ from iap_emulator.models.api_response import ProductPurchase, SubscriptionPurcha
 from iap_emulator.repositories.purchase_store import PurchaseNotFoundError
 from iap_emulator.repositories.subscription_store import SubscriptionNotFoundError
 from iap_emulator.services.purchase_manager import PurchaseManager
-from iap_emulator.services.subscription_engine import SubscriptionEngine
+from iap_emulator.services.subscription_engine import (
+    InvalidSubscriptionStateError,
+    SubscriptionEngine,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Google Play API"])
@@ -437,7 +441,9 @@ async def cancel_subscription(
             )
 
         # Cancel subscription (developer-initiated)
-        subscription_engine.cancel(token, reason="developer")
+        subscription_engine.cancel_subscription(
+            token, cancel_reason=CancelReason.DEVELOPER_CANCELED
+        )
 
         logger.info(
             "cancel_subscription_success",
@@ -447,6 +453,17 @@ async def cancel_subscription(
 
         return None  # 204 No Content
 
+    except InvalidSubscriptionStateError as error:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": 400,
+                    "message": str(error),
+                    "status": "FAILED_PRECONDITION",
+                }
+            },
+        )
     except SubscriptionNotFoundError:
         logger.warning(
             "subscription_not_found",
@@ -525,7 +542,7 @@ async def revoke_subscription(
             )
 
         # Revoke subscription (immediate termination)
-        subscription_engine.revoke(token)
+        subscription_engine.revoke_subscription(token)
 
         logger.info(
             "revoke_subscription_success",
@@ -535,6 +552,17 @@ async def revoke_subscription(
 
         return None  # 204 No Content
 
+    except InvalidSubscriptionStateError as error:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": 400,
+                    "message": str(error),
+                    "status": "FAILED_PRECONDITION",
+                }
+            },
+        )
     except SubscriptionNotFoundError:
         logger.warning(
             "subscription_not_found",

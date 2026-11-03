@@ -288,17 +288,21 @@ async def advance_time(request: AdvanceTimeRequest) -> AdvanceTimeResponse:
     try:
         previous_time = time_controller.get_current_time_millis()
 
-        time_controller.advance_time(
+        result = time_controller.advance_time(
             days=request.days or 0, hours=request.hours or 0, minutes=request.minutes or 0
         )
 
         current_time = time_controller.get_current_time_millis()
         advanced_by = current_time - previous_time
 
-        # TODO: get actual counts from time controller, now it's placeholder
-        renewals_processed = 0
-        expirations_processed = 0
-        events_published = 0
+        renewals_processed = len(result["renewals_processed"])
+        expirations_processed = len(result["expirations_processed"])
+        # every processed transition publishes exactly one event
+        events_published = (
+            renewals_processed
+            + expirations_processed
+            + len(result["grace_periods_expired"])
+        )
 
         logger.info(
             "advance_time_success",
