@@ -34,6 +34,8 @@ curl -X POST http://localhost:8080/emulator/time/advance \
 # Your app receives SUBSCRIPTION_RENEWED event via Pub/Sub
 ```
 
+All lifecycle timestamps (creation, cancellation, renewal, payment failure, revocation) follow the virtual clock, so results are deterministic: advancing 730 days on a yearly plan renews it twice.
+
 **Point your app at localhost:**
 
 ```python
@@ -78,16 +80,16 @@ dotnet run listen   # Listen for RTDN events
 **Google Play API (compatible):**
 
 - `GET .../purchases/subscriptions/{subscriptionId}/tokens/{token}` - Get subscription
-- `POST .../purchases/subscriptions/{subscriptionId}/tokens/{token}:cancel` - Cancel
+- `POST .../purchases/subscriptions/{subscriptionId}/tokens/{token}:cancel` - Cancel (access is kept until expiry, then `SUBSCRIPTION_EXPIRED` is published)
 - `POST .../purchases/subscriptions/{subscriptionId}/tokens/{token}:defer` - Defer
-- `POST .../purchases/subscriptions/{subscriptionId}/tokens/{token}:revoke` - Revoke
+- `POST .../purchases/subscriptions/{subscriptionId}/tokens/{token}:revoke` - Revoke (access ends immediately)
 
 **Control API (testing):**
 
 - `POST /emulator/subscriptions` - Create subscription
 - `POST /emulator/subscriptions/{token}/payment-failed` - Simulate payment failure
 - `POST /emulator/subscriptions/{token}/payment-recovered` - Recover payment
-- `POST /emulator/time/advance` - Fast-forward time
+- `POST /emulator/time/advance` - Fast-forward virtual time; renews once per elapsed billing period, moves expired grace periods to hold, expires canceled subscriptions, and reports the counts
 - `GET /emulator/debug/subscriptions` - List all subscriptions
 
 See [`examples/dotnet/README.md`](examples/dotnet/README.md) for complete API reference.
