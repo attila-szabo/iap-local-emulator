@@ -211,6 +211,7 @@ class SubscriptionEngine:
         subscription = SubscriptionRecord(
             token=token,
             subscription_id=subscription_id,
+            subscription_group_id=product.effective_group_id,
             package_name=package_name,
             user_id=user_id,
             start_time_millis=start_time_millis,
