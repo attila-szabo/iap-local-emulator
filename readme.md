@@ -96,7 +96,7 @@ See [`examples/dotnet/README.md`](examples/dotnet/README.md) for complete API re
 
 ## Configuration
 
-Edit `config/products.yaml` to define your products and subscriptions:
+Edit `config/products.yaml` to define your products and subscriptions. Subscriptions may set an optional `subscription_group_id` (defaults to their own `id`) and `tier`; a user holds at most one current subscription per group, and a replacement links to its predecessor through `linkedPurchaseToken`:
 
 ```yaml
 subscriptions:

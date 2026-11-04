@@ -113,6 +113,7 @@ def _convert_subscription_purchase(record: SubscriptionRecord) -> SubscriptionPu
         userCancellationTimeMillis=user_cancellation_time,
         orderId=record.order_id,
         purchaseToken=record.token,
+        linkedPurchaseToken=record.predecessor_token,
         acknowledgementState=record.acknowledgement_state,
     )
 

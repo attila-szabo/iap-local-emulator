@@ -453,3 +453,31 @@ def test_advance_time_reports_real_counts(client, subscription_engine, yearly_su
     assert body["renewals_processed"] == 1
     assert body["expirations_processed"] == 1
     assert body["events_published"] == 2
+
+
+def test_replacement_subscription_reports_linked_purchase_token(
+    client, subscription_engine, yearly_subscription
+):
+    """A replacement links back to the token it replaced."""
+    replacement = subscription_engine.create_subscription(
+        subscription_id="premium.family.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-lifecycle",
+        replaces_token=yearly_subscription.token,
+    )
+
+    response = client.get(
+        "/androidpublisher/v3/applications/com.example.secureapp/purchases/"
+        f"subscriptions/premium.family.yearly/tokens/{replacement.token}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["linkedPurchaseToken"] == yearly_subscription.token
+
+
+def test_subscription_without_predecessor_has_no_linked_purchase_token(
+    client, yearly_subscription
+):
+    response = client.get(SUBSCRIPTION_URL.format(token=yearly_subscription.token))
+
+    assert response.json().get("linkedPurchaseToken") is None

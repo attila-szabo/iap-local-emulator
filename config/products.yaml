@@ -25,6 +25,9 @@ subscriptions:
     trial_period: "P30D"   # 30 day free trial
     grace_period: "P7D"    # 7 days
 
+    # Optional: SKUs sharing a group are mutually exclusive (defaults to the id)
+    subscription_group_id: "premium"
+    tier: 1  # Optional: higher number = higher tier
     base_plan_id: "personal-yearly"
     offer_id: null  # Base plan, no offer
 
@@ -52,6 +55,8 @@ subscriptions:
     trial_period: "P30D"   # 30 day free trial
     grace_period: "P7D"    # 7 days
 
+    subscription_group_id: "premium"
+    tier: 2
     base_plan_id: "family-yearly"
     offer_id: null  # Base plan, no offer
     max_users: 6
