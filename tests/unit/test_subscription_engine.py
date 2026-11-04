@@ -796,8 +796,8 @@ class TestPaymentFailure:
 
         # Grace period should be 3 days (from product definition)
         grace_period_duration = parse_billing_period("P3D")
-        actual_grace_duration = failed.grace_period_end_millis - int(time.time() * 1000)
-        assert abs(actual_grace_duration - grace_period_duration) < 2000  # Within 2 seconds
+        actual_grace_duration = failed.grace_period_end_millis - engine._now_millis()
+        assert actual_grace_duration == grace_period_duration
 
     def test_payment_failure_with_custom_time(self, engine):
         """Test payment failure with custom failure time."""

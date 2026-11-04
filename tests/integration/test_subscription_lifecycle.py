@@ -5,6 +5,7 @@ import pytest
 
 from iap_emulator.models.product import ProductDefinition
 from iap_emulator.models.subscription import (
+    NotificationType,
     PaymentState,
     SubscriptionState,
 )
@@ -48,6 +49,17 @@ def product_repo():
           billing_period="P1M",
           trial_period="P14D",   # 14 day trial
           grace_period="P7D",    # 7 day grace
+      ),
+      ProductDefinition(
+          id="basic.yearly",
+          type="subs",
+          title="Basic Yearly",
+          description="Basic yearly subscription",
+          price_micros=49900000,
+          currency="USD",
+          billing_period="P1Y",
+          trial_period="P7D",
+          grace_period="P3D",
       ),
   ]
   return ProductRepository(config=mock_config)
@@ -138,8 +150,8 @@ class TestFullSubscriptionLifecycle:
         tc.advance_time(days=31)
         sub = engine.get_subscription(sub.token)
 
-        # canceled don't auto expire, they stay canceled until expiry_time passes
-        assert sub.state == SubscriptionState.CANCELED
+        # canceled subscriptions expire once the virtual clock passes expiry_time
+        assert sub.state == SubscriptionState.EXPIRED
         assert sub.renewal_count == 3, "no renewal after canceled"
 
     def test_multiple_users_independent_lifecycles(self, full_system):
@@ -267,7 +279,7 @@ class TestPaymentFailureIntegration:
         sub = engine.get_subscription(sub.token)
         assert sub.state == SubscriptionState.ON_HOLD
         assert sub.account_hold_start_millis is not None
-        assert len(result["grace_period_expired"]) == 1
+        assert len(result["grace_periods_expired"]) == 1
 
         # Step 4: Verify no renewals happen while on hold
         tc.advance_time(days=30)
@@ -490,3 +502,69 @@ class TestEdgeCasesAndBoundaries:
 
       assert sub1_updated.renewal_count == sub2_updated.renewal_count
       assert sub1_updated.state == sub2_updated.state
+
+
+class TestVirtualTimeLifecycle:
+    """Lifecycle transitions driven purely by the virtual clock."""
+
+    def test_canceled_subscription_expires_at_expiry_time(self, full_system):
+        tc = full_system["time_controller"]
+        engine = full_system["subscription_engine"]
+        sub = engine.create_subscription("basic.monthly", "user-expire")
+        engine.cancel_subscription(sub.token)
+
+        early = tc.advance_time(days=1)
+        assert early["expirations_processed"] == []
+        assert engine.get_subscription(sub.token).state == SubscriptionState.CANCELED
+
+        late = tc.advance_time(days=40)
+        assert late["expirations_processed"] == [sub.token]
+        assert engine.get_subscription(sub.token).state == SubscriptionState.EXPIRED
+
+    def test_expiration_publishes_subscription_expired(self, full_system):
+        tc = full_system["time_controller"]
+        engine = full_system["subscription_engine"]
+        sub = engine.create_subscription("basic.monthly", "user-event")
+        engine.cancel_subscription(sub.token)
+
+        with patch.object(engine, "_publish_event") as publish:
+            tc.advance_time(days=40)
+
+        publish.assert_called_once_with(NotificationType.SUBSCRIPTION_EXPIRED, sub)
+
+    def test_cancel_timestamp_follows_virtual_time(self, full_system):
+        tc = full_system["time_controller"]
+        engine = full_system["subscription_engine"]
+        sub = engine.create_subscription("basic.monthly", "user-clock")
+        tc.advance_time(days=2)
+
+        canceled = engine.cancel_subscription(sub.token)
+
+        assert canceled.canceled_time_millis == tc.get_current_time_millis()
+
+    def test_monthly_plan_renews_once_per_elapsed_period(self, full_system):
+        tc = full_system["time_controller"]
+        engine = full_system["subscription_engine"]
+        sub = engine.create_subscription("basic.monthly", "user-monthly")
+
+        result = tc.advance_time(days=7 + 30 * 3)
+
+        assert len(result["renewals_processed"]) == 3
+        assert engine.get_subscription(sub.token).renewal_count == 3
+
+    def test_yearly_plan_renews_once_per_elapsed_period(self, full_system):
+        tc = full_system["time_controller"]
+        engine = full_system["subscription_engine"]
+        sub = engine.create_subscription("basic.yearly", "user-yearly")
+
+        result = tc.advance_time(days=7 + 365 * 2)
+
+        assert len(result["renewals_processed"]) == 2
+        assert engine.get_subscription(sub.token).renewal_count == 2
+
+    def test_set_time_reports_same_keys_as_advance_time(self, full_system):
+        tc = full_system["time_controller"]
+        advanced = tc.advance_time(days=1)
+        target = tc.get_current_time_millis() + 86_400_000
+
+        assert set(tc.set_time(target)) == set(advanced) - {"time_advanced_millis"}

@@ -374,3 +374,110 @@ def test_refund_order_with_revoke_parameter(client, subscription_engine):
     # Verify subscription was revoked
     updated_subscription = subscription_engine.get_subscription(subscription.token)
     assert updated_subscription.state == SubscriptionState.EXPIRED
+
+
+SUBSCRIPTION_URL = (
+    "/androidpublisher/v3/applications/com.example.secureapp/purchases/"
+    "subscriptions/premium.personal.yearly/tokens/{token}"
+)
+
+
+@pytest.fixture
+def yearly_subscription(subscription_engine):
+    """Active yearly subscription owned by the smoke-test package."""
+    return subscription_engine.create_subscription(
+        subscription_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-lifecycle",
+    )
+
+
+def test_cancel_subscription_keeps_access_until_expiry(
+    client, subscription_engine, yearly_subscription
+):
+    """Developer cancel leaves the subscription CANCELED, not expired."""
+    from iap_emulator.models.subscription import SubscriptionState
+
+    response = client.post(
+        SUBSCRIPTION_URL.format(token=yearly_subscription.token) + ":cancel"
+    )
+
+    assert response.status_code == 204
+    canceled = subscription_engine.get_subscription(yearly_subscription.token)
+    assert canceled.state == SubscriptionState.CANCELED
+    assert canceled.expiry_time_millis == yearly_subscription.expiry_time_millis
+
+
+def test_revoke_subscription_expires_immediately(
+    client, subscription_engine, yearly_subscription
+):
+    """Revoke terminates access right away."""
+    from iap_emulator.models.subscription import SubscriptionState
+
+    response = client.post(
+        SUBSCRIPTION_URL.format(token=yearly_subscription.token) + ":revoke"
+    )
+
+    assert response.status_code == 204
+    revoked = subscription_engine.get_subscription(yearly_subscription.token)
+    assert revoked.state == SubscriptionState.EXPIRED
+
+
+def test_cancel_expired_subscription_returns_failed_precondition(
+    client, subscription_engine, yearly_subscription
+):
+    """Canceling an already revoked subscription is a client error."""
+    subscription_engine.revoke_subscription(yearly_subscription.token)
+
+    response = client.post(
+        SUBSCRIPTION_URL.format(token=yearly_subscription.token) + ":cancel"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["status"] == "FAILED_PRECONDITION"
+
+
+def test_advance_time_reports_real_counts(client, subscription_engine, yearly_subscription):
+    """The advance endpoint reports renewals and expirations it processed."""
+    other = subscription_engine.create_subscription(
+        subscription_id="premium.personal.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-canceled",
+    )
+    subscription_engine.cancel_subscription(other.token)
+
+    response = client.post("/emulator/time/advance", json={"days": 366})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["renewals_processed"] == 1
+    assert body["expirations_processed"] == 1
+    assert body["events_published"] == 2
+
+
+def test_replacement_subscription_reports_linked_purchase_token(
+    client, subscription_engine, yearly_subscription
+):
+    """A replacement links back to the token it replaced."""
+    replacement = subscription_engine.create_subscription(
+        subscription_id="premium.family.yearly",
+        package_name="com.example.secureapp",
+        user_id="test-user-lifecycle",
+        replaces_token=yearly_subscription.token,
+    )
+
+    response = client.get(
+        "/androidpublisher/v3/applications/com.example.secureapp/purchases/"
+        f"subscriptions/premium.family.yearly/tokens/{replacement.token}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["linkedPurchaseToken"] == yearly_subscription.token
+
+
+def test_subscription_without_predecessor_has_no_linked_purchase_token(
+    client, yearly_subscription
+):
+    response = client.get(SUBSCRIPTION_URL.format(token=yearly_subscription.token))
+
+    assert response.json().get("linkedPurchaseToken") is None

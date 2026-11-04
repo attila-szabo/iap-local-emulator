@@ -27,9 +27,22 @@ class ProductDefinition(BaseModel):
     base_plan_id: Optional[str] = Field(None, description="Base plan identifier")
     offer_id: Optional[str] = Field(None, description="Promotional offer ID, null for base plan")
 
+    # Subscription group (mutually exclusive SKUs); defaults to the SKU ID
+    subscription_group_id: Optional[str] = Field(
+        None, description="Group of mutually exclusive subscriptions, defaults to id"
+    )
+    tier: Optional[int] = Field(
+        None, ge=0, description="Rank inside the group, higher means a higher tier"
+    )
+
     # Additional metadata
     features: list[str] = Field(default_factory=list, description="List of features")
     max_users: Optional[int] = Field(None, description="Maximum users (for family plans)")
+
+    @property
+    def effective_group_id(self) -> str:
+        """Subscription group ID, falling back to the SKU ID."""
+        return self.subscription_group_id or self.id
 
     class Config:
         json_schema_extra = {

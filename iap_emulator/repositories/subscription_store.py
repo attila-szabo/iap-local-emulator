@@ -15,6 +15,22 @@ class SubscriptionNotFoundError(Exception):
     pass
 
 
+class ConflictingEntitlementError(ValueError):
+    """Raised when a second current entitlement would exist in one group."""
+
+
+#: States in which the user still holds, or may regain, access to the group.
+CURRENT_STATES = frozenset(
+    {
+        SubscriptionState.ACTIVE,
+        SubscriptionState.CANCELED,
+        SubscriptionState.PAUSED,
+        SubscriptionState.IN_GRACE_PERIOD,
+        SubscriptionState.ON_HOLD,
+    }
+)
+
+
 class SubscriptionStore:
     """In-memory storage for subscription records.
 
@@ -33,15 +49,102 @@ class SubscriptionStore:
         Args:
             subscription: SubscriptionRecord to store
 
+        A subscription in a current state must either be the only current one
+        in its (package, user, group) or name the current one as its
+        predecessor, which then links to it as successor.
+
         Raises:
             ValueError: If subscription token already exists
+            ConflictingEntitlementError: If the group already has a current
+                entitlement that this subscription does not replace
+            SubscriptionNotFoundError: If the named predecessor does not exist
         """
         with self._lock:
             if subscription.token in self._subscriptions:
                 raise ValueError(
                     f"Subscription with token '{subscription.token}' already exists"
                 )
+            self._link_to_predecessor(subscription)
             self._subscriptions[subscription.token] = subscription
+
+    def _link_to_predecessor(self, subscription: SubscriptionRecord) -> None:
+        """Enforce one current chain per group and link a replacement."""
+        if subscription.state not in CURRENT_STATES:
+            return
+
+        current = self.get_current_in_group(
+            subscription.package_name,
+            subscription.user_id,
+            subscription.subscription_group_id,
+        )
+        if subscription.predecessor_token is None:
+            if current is not None:
+                raise ConflictingEntitlementError(
+                    f"User {subscription.user_id} already has a current subscription "
+                    f"in group {subscription.subscription_group_id}"
+                )
+            return
+
+        predecessor = self.get_by_token(subscription.predecessor_token)
+        if predecessor is not current:
+            raise ConflictingEntitlementError(
+                f"Subscription {predecessor.token} is not the current entitlement "
+                f"of group {subscription.subscription_group_id}"
+            )
+        predecessor.successor_token = subscription.token
+
+    def get_current_in_group(
+        self, package_name: str, user_id: str, subscription_group_id: str
+    ) -> Optional[SubscriptionRecord]:
+        """Get the user's current entitlement in a subscription group.
+
+        Returns:
+            The unreplaced subscription in a current state, or None
+        """
+        with self._lock:
+            return next(
+                (
+                    s
+                    for s in self._subscriptions.values()
+                    if s.package_name == package_name
+                    and s.user_id == user_id
+                    and s.subscription_group_id == subscription_group_id
+                    and s.state in CURRENT_STATES
+                    and s.successor_token is None
+                ),
+                None,
+            )
+
+    def get_lineage(self, token: str) -> List[SubscriptionRecord]:
+        """Get the replacement chain a token belongs to, oldest first.
+
+        Raises:
+            SubscriptionNotFoundError: If token not found
+        """
+        with self._lock:
+            chain = []
+            link: Optional[SubscriptionRecord] = self._subscriptions.get(
+                self.get_by_token(token).original_token
+            )
+            while link is not None:
+                chain.append(link)
+                link = self._subscriptions.get(link.successor_token or "")
+            return chain
+
+    def get_with_pending_changes(self) -> List[SubscriptionRecord]:
+        """Get subscriptions that have a scheduled SKU change."""
+        with self._lock:
+            return [s for s in self._subscriptions.values() if s.pending_change]
+
+    def get_canceled_due(self, at_time_millis: int) -> List[SubscriptionRecord]:
+        """Get canceled subscriptions whose paid period ended by the given time."""
+        with self._lock:
+            return [
+                s
+                for s in self._subscriptions.values()
+                if s.state == SubscriptionState.CANCELED
+                and s.expiry_time_millis <= at_time_millis
+            ]
 
     def get_by_token(self, token: str) -> SubscriptionRecord:
         """Get subscription by token.

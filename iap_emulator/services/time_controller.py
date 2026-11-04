@@ -34,6 +34,7 @@ class TimeController:
         self._virtual_time_millis = int(time.time() * 1000)
         self._time_offset_millis = 0
         self._subscription_engine = subscription_engine or get_subscription_engine()
+        self._subscription_engine.attach_time_controller(self)
 
         logger.info(
             "time_controller initialized",
@@ -92,8 +93,9 @@ class TimeController:
                 "old_time_millis": current_time,
                 "new_time_millis": current_time,
                 "time_advanced_millis":0,
-                "renewals_processed":[],
-                "grace_periods_expired":[]
+                "renewals_processed": [],
+                "grace_periods_expired": [],
+                "expirations_processed": [],
             }
 
         # update time
@@ -115,62 +117,84 @@ class TimeController:
                 minutes=minutes,
             )
 
-        renewed_tokens = self._process_renewals(new_time)
-        expired_grace_periods = self._process_grace_period_expirations(new_time)
-
         return {
             "old_time_millis": old_time,
             "new_time_millis": new_time,
             "time_advanced_millis": milliseconds_to_advance,
-            "renewals_processed": renewed_tokens,
-            "grace_period_expired": expired_grace_periods,
+            **self._process_time_events(new_time),
+        }
+
+    def _process_time_events(self, current_time_millis: int) -> dict[str, list[str]]:
+        """Run every time-driven lifecycle transition due at the given time.
+
+        Renewals run first so a renewing subscription is never expired, then
+        grace periods, then expirations of canceled subscriptions.
+
+        Args:
+            current_time_millis: current virtual time
+        Returns:
+            Token lists keyed by renewals_processed, grace_periods_expired
+            and expirations_processed
+        """
+        return {
+            "renewals_processed": self._process_renewals(current_time_millis),
+            "grace_periods_expired": self._process_grace_period_expirations(
+                current_time_millis
+            ),
+            "expirations_processed": self._process_expirations(current_time_millis),
         }
 
     def _process_renewals(self, current_time_millis: int) -> list[str]:
         """
-        Processes all subscriptions that become due for renewal at that time.
+        Processes all subscriptions that become due for renewal up to that time.
+
+        A subscription is renewed once per elapsed billing period, so advancing
+        several periods at once (monthly, yearly, ...) yields one renewal and
+        one event per period.
         Args:
             current_time_millis: current time
         Returns:
-            List of tokens for subscriptions that were renewed
+            Tokens of renewed subscriptions, one entry per renewal
 
         """
-        from iap_emulator.repositories.subscription_store import get_subscription_store
-        store = get_subscription_store()
-        renewed_tokens = []
+        store = self._subscription_engine.store
+        renewed_tokens: list[str] = []
+        failed_tokens: set[str] = set()
 
-        # find all subs
-        subscriptions_due = store.get_renewals_due(current_time_millis)
+        while subscriptions_due := [
+            s
+            for s in store.get_renewals_due(current_time_millis)
+            if s.token not in failed_tokens
+        ]:
+            logger.info(
+                "processing renewals",
+                current_time_millis=current_time_millis,
+                subscriptions_due=len(subscriptions_due),
+            )
 
-        logger.info(
-            "processing renewals",
-            current_time_millis=current_time_millis,
-            subscriptions_due=len(subscriptions_due),
-        )
+            for subscription in subscriptions_due:
+                try:
+                    renewed = self._subscription_engine.renew_subscription(
+                        token=subscription.token,
+                        renewal_time_millis=subscription.expiry_time_millis,
+                    )
+                    renewed_tokens.append(renewed.token)
 
-        # renew each subscription
-        for subscription in subscriptions_due:
-            try:
-                renewed = self._subscription_engine.renew_subscription(
-                    token=subscription.token,
-                    renewal_time_millis=subscription.expiry_time_millis,
-                )
-                renewed_tokens.append(renewed.token)
+                    logger.debug(
+                        "subscription renewed by time controller",
+                        token=subscription.token[:20],
+                        subscription_id=subscription.subscription_id,
+                        new_expiry=renewed.expiry_time_millis,
+                    )
 
-                logger.debug(
-                    "subscription renewed by time controller",
-                    token = subscription.token[:20],
-                    subscription_id = subscription.subscription_id,
-                    new_expiry = renewed.expiry_time_millis,
-                )
-
-            except Exception as e:
-                logger.error(
-                    "subscription renewal failed",
-                    token=subscription.token[:20] + "...",
-                    subscription_id = subscription.subscription_id,
-                    error=str(e)
-                )
+                except Exception as e:
+                    failed_tokens.add(subscription.token)
+                    logger.error(
+                        "subscription renewal failed",
+                        token=subscription.token[:20] + "...",
+                        subscription_id=subscription.subscription_id,
+                        error=str(e),
+                    )
         if renewed_tokens:
             logger.info(
                 "subscription renewal completed",
@@ -200,6 +224,16 @@ class TimeController:
             )
 
         return expired_tokens
+
+    def _process_expirations(self, current_time_millis: int) -> list[str]:
+        """Expire canceled subscriptions whose paid period has ended.
+        Args:
+            current_time_millis: current virtual time
+        Returns:
+            List of tokens for subscriptions that moved to EXPIRED
+        """
+        expired = self._subscription_engine.process_expirations(current_time_millis)
+        return [sub.token for sub in expired]
 
     def set_time(self, timestamp_millis: int) -> dict:
         """Set virtual time to a specific timestamp.
@@ -237,15 +271,10 @@ class TimeController:
                 new_time_millis=self._time_offset_millis,
             )
 
-        # process renewals
-        renewed_tokens = self._process_renewals(timestamp_millis)
-        expired_grace_periods = self._process_grace_period_expirations(timestamp_millis)
-
         return {
             "old_time_millis": old_time,
             "new_time_millis": timestamp_millis,
-            "renewal_processed": renewed_tokens,
-            "grace_period_expired": expired_grace_periods
+            **self._process_time_events(timestamp_millis),
         }
 
     def reset_time(self) -> dict:

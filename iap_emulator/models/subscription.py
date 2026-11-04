@@ -6,7 +6,7 @@ Includes subscription states, renewal tracking, billing periods.
 from enum import IntEnum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SubscriptionState(IntEnum):
@@ -56,6 +56,14 @@ class CancelReason(IntEnum):
     DEVELOPER_CANCELED = 3  # Developer canceled
 
 
+class PendingChange(BaseModel):
+    """A scheduled replacement of a subscription by another SKU."""
+
+    target_subscription_id: str = Field(..., description="SKU the user is moving to")
+    effective_time_millis: int = Field(..., description="When the change takes effect")
+    mode: str = Field(default="deferred", description="'immediate' or 'deferred'")
+
+
 class SubscriptionRecord(BaseModel):
     """Internal subscription record tracking state and lifecycle."""
 
@@ -96,10 +104,32 @@ class SubscriptionRecord(BaseModel):
     # Renewal count
     renewal_count: int = Field(default=0, description="Number of times renewed")
 
+    # Group and replacement chain
+    subscription_group_id: str = Field(
+        default="", description="Subscription group, defaults to subscription_id"
+    )
+    original_token: str = Field(
+        default="", description="Token that started the chain, defaults to token"
+    )
+    predecessor_token: Optional[str] = Field(None, description="Token this one replaced")
+    successor_token: Optional[str] = Field(None, description="Token that replaced this one")
+    pending_change: Optional[PendingChange] = Field(
+        None, description="Scheduled replacement by another SKU"
+    )
+
     # Linked product info
     order_id: str = Field(..., description="Unique order ID")
     price_amount_micros: int = Field(..., description="Price paid in micros")
     price_currency_code: str = Field(default="USD", description="Currency code")
+
+    @model_validator(mode="after")
+    def _default_group_and_chain(self) -> "SubscriptionRecord":
+        """Single-SKU group and one-element chain unless stated otherwise."""
+        if not self.subscription_group_id:
+            self.subscription_group_id = self.subscription_id
+        if not self.original_token:
+            self.original_token = self.token
+        return self
 
     def set_state(self, new_state: SubscriptionState, reason: Optional[str] = None) -> None:
         """Change subscription state and log the transition.
