@@ -25,6 +25,7 @@ from iap_emulator.repositories.product_repository import (
     get_product_repository,
 )
 from iap_emulator.repositories.subscription_store import (
+    ConflictingEntitlementError,
     SubscriptionStore,
     get_subscription_store,
 )
@@ -142,6 +143,7 @@ class SubscriptionEngine:
             package_name: Optional[str] = None,
             start_time_millis: Optional[int] = None,
             with_trial: bool = False,
+            replaces_token: Optional[str] = None,
     ) -> SubscriptionRecord:
         """Create a new subscription.
 
@@ -151,13 +153,16 @@ class SubscriptionEngine:
             package_name: Android package name (defaults to config default)
             start_time_millis: Subscription start time (defaults to now)
             with_trial: Whether to start with trial period
+            replaces_token: Current subscription of the same group this one
+                replaces, extending its replacement chain
 
         Returns:
             Created SubscriptionRecord
 
         Raises:
             ProductNotFoundError: If subscription_id is not found
-            SubscriptionError: If user already has this subscription
+            SubscriptionError: If the user already has a current subscription
+                in the product's group that this one does not replace
         """
         # Get product definition
         product = self.product_repo.get_by_id(subscription_id)
@@ -166,21 +171,9 @@ class SubscriptionEngine:
         if package_name is None:
             package_name = self.config.default_package_name
 
-        # Check if user already has an active subscription
-        existing = self.store.get_user_subscription(
-            user_id=user_id,
-            subscription_id=subscription_id,
-            package_name=package_name,
+        predecessor = (
+            self.store.get_by_token(replaces_token) if replaces_token else None
         )
-        if existing and existing.state in (
-                SubscriptionState.ACTIVE,
-                SubscriptionState.PAUSED,
-                SubscriptionState.IN_GRACE_PERIOD,
-                SubscriptionState.ON_HOLD,
-        ):
-            raise SubscriptionError(
-                f"User {user_id} already has an active subscription for {subscription_id}"
-            )
 
         # Generate token and order ID
         token = generate_subscription_token()
@@ -212,6 +205,8 @@ class SubscriptionEngine:
             token=token,
             subscription_id=subscription_id,
             subscription_group_id=product.effective_group_id,
+            original_token=predecessor.original_token if predecessor else token,
+            predecessor_token=replaces_token,
             package_name=package_name,
             user_id=user_id,
             start_time_millis=start_time_millis,
@@ -228,8 +223,14 @@ class SubscriptionEngine:
             price_currency_code=product.currency,
         )
 
-        # Store subscription
-        self.store.add(subscription)
+        # Store subscription (atomically enforces one current chain per group)
+        try:
+            self.store.add(subscription)
+        except ConflictingEntitlementError as error:
+            raise SubscriptionError(
+                f"User {user_id} already has an active subscription in group "
+                f"{subscription.subscription_group_id}: {error}"
+            ) from error
 
         logger.info(
             "subscription_created",
@@ -909,9 +910,7 @@ class SubscriptionEngine:
         """
         expired = []
 
-        for subscription in self.store.get_by_state(SubscriptionState.CANCELED):
-            if current_time_millis < subscription.expiry_time_millis:
-                continue
+        for subscription in self.store.get_canceled_due(current_time_millis):
             subscription.set_state(
                 SubscriptionState.EXPIRED,
                 reason="Canceled subscription reached expiry",

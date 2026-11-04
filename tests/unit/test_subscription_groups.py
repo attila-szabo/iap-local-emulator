@@ -1,9 +1,25 @@
 """Tests for subscription groups, tiers and replacement chains."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from iap_emulator.models.product import ProductDefinition
-from iap_emulator.models.subscription import PendingChange, SubscriptionRecord
+from iap_emulator.models.subscription import (
+    PendingChange,
+    SubscriptionRecord,
+    SubscriptionState,
+)
+from iap_emulator.repositories.product_repository import ProductRepository
+from iap_emulator.repositories.subscription_store import (
+    ConflictingEntitlementError,
+    SubscriptionNotFoundError,
+    SubscriptionStore,
+)
+from iap_emulator.services.subscription_engine import (
+    SubscriptionEngine,
+    SubscriptionError,
+)
 
 
 def make_product(**overrides) -> ProductDefinition:
@@ -78,3 +94,177 @@ class TestRecordChainFields:
         )
 
         assert make_record(pending_change=change).pending_change.mode == "deferred"
+
+
+@pytest.fixture
+def store():
+    return SubscriptionStore()
+
+
+class TestGroupEntitlement:
+    def test_unrelated_groups_coexist_for_one_user(self, store):
+        store.add(make_record("a", subscription_id="app.one"))
+        store.add(make_record("b", subscription_id="app.two"))
+
+        assert store.get_current_in_group("com.example.app", "user-1", "app.one").token == "a"
+        assert store.get_current_in_group("com.example.app", "user-1", "app.two").token == "b"
+
+    def test_same_group_different_user_or_package_does_not_conflict(self, store):
+        store.add(make_record("a"))
+        store.add(make_record("b", user_id="user-2"))
+        store.add(make_record("c", package_name="com.other.app"))
+
+    def test_second_current_entitlement_in_group_is_rejected(self, store):
+        store.add(make_record("a", subscription_group_id="premium"))
+
+        with pytest.raises(ConflictingEntitlementError):
+            store.add(
+                make_record(
+                    "b", subscription_id="premium.family", subscription_group_id="premium"
+                )
+            )
+
+    def test_canceled_subscription_still_blocks_its_group(self, store):
+        store.add(make_record("a", state=SubscriptionState.CANCELED))
+
+        with pytest.raises(ConflictingEntitlementError):
+            store.add(make_record("b"))
+
+    def test_expired_subscription_does_not_block_its_group(self, store):
+        store.add(make_record("a", state=SubscriptionState.EXPIRED))
+
+        store.add(make_record("b"))
+
+        assert store.get_current_in_group("com.example.app", "user-1", "premium.personal.yearly").token == "b"
+
+    def test_no_current_entitlement_returns_none(self, store):
+        assert store.get_current_in_group("com.example.app", "user-1", "none") is None
+
+
+class TestReplacementChain:
+    def build_chain(self, store):
+        store.add(make_record("a", subscription_group_id="premium"))
+        store.add(
+            make_record(
+                "b",
+                subscription_group_id="premium",
+                original_token="a",
+                predecessor_token="a",
+            )
+        )
+        store.add(
+            make_record(
+                "c",
+                subscription_group_id="premium",
+                original_token="a",
+                predecessor_token="b",
+            )
+        )
+
+    def test_replacement_links_successor_and_becomes_current(self, store):
+        self.build_chain(store)
+
+        assert store.get_by_token("a").successor_token == "b"
+        assert store.get_by_token("b").successor_token == "c"
+        current = store.get_current_in_group("com.example.app", "user-1", "premium")
+        assert current.token == "c"
+
+    @pytest.mark.parametrize("token", ["a", "b", "c"])
+    def test_lineage_is_queryable_from_any_token(self, store, token):
+        self.build_chain(store)
+
+        assert [s.token for s in store.get_lineage(token)] == ["a", "b", "c"]
+
+    def test_lineage_of_unreplaced_subscription_is_itself(self, store):
+        store.add(make_record("solo"))
+
+        assert [s.token for s in store.get_lineage("solo")] == ["solo"]
+
+    def test_lineage_of_unknown_token_raises(self, store):
+        with pytest.raises(SubscriptionNotFoundError):
+            store.get_lineage("missing")
+
+    def test_replacing_a_non_current_subscription_is_rejected(self, store):
+        self.build_chain(store)
+
+        with pytest.raises(ConflictingEntitlementError):
+            store.add(
+                make_record(
+                    "d",
+                    subscription_group_id="premium",
+                    original_token="a",
+                    predecessor_token="a",
+                )
+            )
+
+    def test_unknown_predecessor_raises(self, store):
+        with pytest.raises(SubscriptionNotFoundError):
+            store.add(make_record("b", predecessor_token="ghost"))
+
+
+class TestPendingAndCanceledQueries:
+    def test_pending_change_query_returns_only_flagged_subscriptions(self, store):
+        change = PendingChange(
+            target_subscription_id="premium.family.yearly", effective_time_millis=5_000
+        )
+        store.add(make_record("a", subscription_id="app.one", pending_change=change))
+        store.add(make_record("b", subscription_id="app.two"))
+
+        assert [s.token for s in store.get_with_pending_changes()] == ["a"]
+
+    def test_canceled_due_respects_expiry_and_state(self, store):
+        store.add(make_record("due", subscription_id="a", state=SubscriptionState.CANCELED))
+        store.add(
+            make_record(
+                "later",
+                subscription_id="b",
+                state=SubscriptionState.CANCELED,
+                expiry_time_millis=9_000,
+            )
+        )
+        store.add(make_record("active", subscription_id="c"))
+
+        assert [s.token for s in store.get_canceled_due(2_000)] == ["due"]
+
+
+@pytest.fixture
+def engine(store):
+    config = MagicMock()
+    config.products.subscriptions = [
+        make_product(id="premium.personal", subscription_group_id="premium", tier=1),
+        make_product(id="premium.family", subscription_group_id="premium", tier=2),
+        make_product(id="other.plan"),
+    ]
+    config.default_package_name = "com.example.app"
+    with patch("iap_emulator.services.subscription_engine.get_config", return_value=config):
+        yield SubscriptionEngine(
+            subscription_store=store, product_repository=ProductRepository(config=config)
+        )
+
+
+class TestEngineGroups:
+    def test_created_subscription_carries_catalog_group(self, engine):
+        assert engine.create_subscription("premium.personal", "u").subscription_group_id == "premium"
+        assert engine.create_subscription("other.plan", "u").subscription_group_id == "other.plan"
+
+    def test_other_sku_of_same_group_is_rejected(self, engine):
+        engine.create_subscription("premium.personal", "u")
+
+        with pytest.raises(SubscriptionError, match="already has an active subscription"):
+            engine.create_subscription("premium.family", "u")
+
+    def test_unrelated_group_coexists(self, engine):
+        engine.create_subscription("premium.personal", "u")
+
+        assert engine.create_subscription("other.plan", "u").state == SubscriptionState.ACTIVE
+
+    def test_replaces_token_extends_chain(self, engine):
+        first = engine.create_subscription("premium.personal", "u")
+
+        second = engine.create_subscription(
+            "premium.family", "u", replaces_token=first.token
+        )
+
+        assert second.predecessor_token == first.token
+        assert second.original_token == first.token
+        assert engine.get_subscription(first.token).successor_token == second.token
